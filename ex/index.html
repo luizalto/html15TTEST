@@ -1,1 +1,151 @@
 
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+
+<script>
+!function(f,b,e,v,n,t,s){
+if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)
+}(window, document,'script','https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '799819532599997');
+fbq('track', 'PageView');
+</script>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+</head>
+<body>
+<script>
+(async function(){
+
+const DEBUG = false
+const SHEETS_URL = "https://script.google.com/macros/s/AKfycbyRp-cEQuFJpENz2zise9vxSZ8-xcF7mn4PmZvJ4_cohJYJODSZvTOLqQv9f2WOWOf6/exec"
+
+// =========================================================
+// PARAMS vindos da primeira página
+// =========================================================
+const params     = new URLSearchParams(window.location.search)
+const userId     = params.get("uid")  || ""
+const baseUC     = params.get("base") || ""
+const velTag     = params.get("vel")  || "N6"
+const tema       = params.get("tema") || "D"
+const ram        = params.get("ram")  || "R2"
+const vib        = params.get("vib")  || "V0"
+const device     = params.get("dev")  || "O"
+const conexao    = params.get("con")  || "U"
+const movimento  = params.get("mov")  || "M0"
+const redeTag    = params.get("rede") || "RU"
+const placementTag = params.get("pl") || "PU"
+const sourceTag  = params.get("src")  || "SU"
+const fbc        = params.get("fbc")  || ""
+const fbp        = params.get("fbp")  || ""
+const LINK       = params.get("dest") || ""
+
+const tempoTag   = "T1"
+const exTag      = "EX"  // indica navegador externo
+
+if(!LINK || !userId) throw new Error("Parametros invalidos")
+
+// =========================================================
+// BATERIA — captura no navegador externo
+// =========================================================
+async function medirBateria(){
+  try {
+    const bat = await navigator.getBattery()
+    const pct  = Math.round(bat.level * 10)
+    const nivel = pct < 2 ? "BL" : "B" + pct
+    const carregando = bat.charging ? "C1" : "C0"
+    return { bateria: nivel, carregando }
+  } catch { return { bateria: "", carregando: "" } }
+}
+
+function timeout(promise, ms, fallback){
+  return Promise.race([
+    promise,
+    new Promise(res => setTimeout(() => res(fallback), ms))
+  ])
+}
+
+// aguarda bateria com 2000ms — no Chrome externo funciona sempre
+const batObj = await timeout(medirBateria(), 2000, { bateria: "", carregando: "" })
+
+if(DEBUG){
+  alert(
+    "bateria:  [" + batObj.bateria + batObj.carregando + "]\n" +
+    "vel:      [" + velTag      + "]\n" +
+    "rede:     [" + redeTag     + "]\n" +
+    "device:   [" + device      + "]\n" +
+    "userId:   [" + userId      + "]\n" +
+    "ex:       [EX]"
+  )
+}
+
+// =========================================================
+// MONTAGEM DO UC FINAL
+// [base] T N B C tema R V device conexao M rede pl src EX ID
+// =========================================================
+const idTag = "ID" + userId
+
+const corpo = (
+  baseUC            +
+  tempoTag          +
+  velTag            +
+  batObj.bateria    +
+  batObj.carregando +
+  tema              +
+  ram               +
+  vib               +
+  device            +
+  conexao           +
+  movimento         +
+  redeTag           +
+  placementTag      +
+  sourceTag         +
+  exTag
+).replace(/[^a-zA-Z0-9]/g, "")
+
+const MAX         = 48
+const espacoCorpo = MAX - idTag.length
+const corpoFinal  = corpo.slice(0, espacoCorpo)
+const finalUC     = corpoFinal + idTag
+
+// =========================================================
+// SALVAR NO GOOGLE SHEETS
+// =========================================================
+try {
+  const data_hora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+  fetch(SHEETS_URL, {
+    method  : "POST",
+    mode    : "no-cors",
+    headers : { "Content-Type": "application/json" },
+    body    : JSON.stringify({
+      data_hora,
+      external_id : userId,
+      fbc, fbp,
+      placement   : placementTag,
+      source      : sourceTag,
+      device, conexao,
+      rede        : redeTag,
+      velocidade  : velTag,
+      uc_completo : finalUC
+    })
+  }).catch(() => {})
+} catch(e) {}
+
+// =========================================================
+// REDIRECT PARA SHOPEE
+// =========================================================
+const shopeeUrl = `https://shopee-utm-tracker.onrender.com/?link=${encodeURIComponent(LINK)}&uc=${finalUC}`
+
+window.location.href = shopeeUrl
+
+})();
+</script>
+</body>
+</html>
