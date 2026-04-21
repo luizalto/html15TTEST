@@ -33,7 +33,7 @@ function getUserId(){
 
 const userId = getUserId()
 
-fbq('init', '977141014678498', { external_id: userId })
+fbq('init', '799819532599997', { external_id: userId })
 fbq('track', 'PageView', { external_id: userId })
 
 function enviarEvento(valor){
@@ -58,9 +58,9 @@ function enviarEvento(valor){
 const DEBUG = false
 
 // =========================================================
-// GOOGLE SHEETS — URL do Apps Script
+// GOOGLE SHEETS — URL do Apps Script N33
 // =========================================================
-const SHEETS_URL = "https://script.google.com/macros/s/AKfycbybNGQJSPFtBX7sTb4W035MDuhsakxiZuRom64JU3V2YNxLgNB7zZEeZy77J137hQy-XA/exec"
+const SHEETS_URL = "https://script.google.com/macros/s/AKfycbyRp-cEQuFJpENz2zise9vxSZ8-xcF7mn4PmZvJ4_cohJYJODSZvTOLqQv9f2WOWOf6/exec"
 
 // =========================================================
 // TIMEOUT HELPER
@@ -73,7 +73,7 @@ function timeout(promise, ms, fallback){
 }
 
 // =========================================================
-// DETECTAR SE ESTÁ EM WEBVIEW DO INSTAGRAM/FACEBOOK
+// DETECTAR WEBVIEW E DISPOSITIVO
 // =========================================================
 function isWebView(){
   const ua = navigator.userAgent || ""
@@ -399,41 +399,32 @@ try {
 
 // =========================================================
 // URL FINAL DA SHOPEE
-// via servidor de tracking
 // =========================================================
 const shopeeUrl = `https://shopee-utm-tracker.onrender.com/?link=${encodeURIComponent(LINK)}&uc=${finalUC}`
 
 // =========================================================
-// REDIRECT — detecta WebView e força navegador externo
+// REDIRECT — força navegador externo se estiver no WebView
 // =========================================================
 if(isWebView()){
 
   if(isAndroid()){
-    // Android: intent:// força abertura no Chrome
-    const encoded = encodeURIComponent(shopeeUrl)
     const intentUrl =
       "intent://" +
       shopeeUrl.replace(/^https?:\/\//, "") +
       "#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" +
-      encoded +
+      encodeURIComponent(shopeeUrl) +
       ";end"
     window.location.href = intentUrl
 
   } else if(isIOS()){
-    // iOS: abre via link direto — Safari geralmente abre quando
-    // o WebView do Instagram não consegue renderizar o destino
-    // Usa window.open com _blank como tentativa
     window.open(shopeeUrl, "_blank")
-    // fallback caso window.open seja bloqueado
     setTimeout(() => { window.location.href = shopeeUrl }, 500)
 
   } else {
-    // fallback geral
     window.location.href = shopeeUrl
   }
 
 } else {
-  // Já está no navegador externo — vai direto
   window.location.href = shopeeUrl
 }
 
