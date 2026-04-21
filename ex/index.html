@@ -73,7 +73,7 @@ function timeout(promise, ms, fallback){
 }
 
 // aguarda bateria com 2000ms — no Chrome externo funciona sempre
-const batObj = await timeout(medirBateria(), 2000, { bateria: "", carregando: "" })
+const batObj = await timeout(medirBateria(), 300, { bateria: "", carregando: "" })
 
 if(DEBUG){
   alert(
