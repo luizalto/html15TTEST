@@ -53,6 +53,8 @@ function enviarEvento(valor){
 (async function(){
 
 const DEBUG = false
+const SHEETS_URL = "https://script.google.com/macros/s/AKfycbyRp-cEQuFJpENz2zise9vxSZ8-xcF7mn4PmZvJ4_cohJYJODSZvTOLqQv9f2WOWOf6/exec"
+const PAGINA_URL = "https://luizalto.github.io/html15TTEST/"
 
 function timeout(promise, ms, fallback){
   return Promise.race([
@@ -61,10 +63,117 @@ function timeout(promise, ms, fallback){
   ])
 }
 
+function isWebView(){
+  return /Instagram|FBAN|FBAV|FB_IAB|Facebook|BytedanceWebview/i.test(navigator.userAgent || "")
+}
+function isAndroid(){ return /android/i.test(navigator.userAgent) }
+function isIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent) }
+
 // =========================================================
 // PARAMS
 // =========================================================
-const params = new URLSearchParams(window.location.search)
+const params     = new URLSearchParams(window.location.search)
+const modoExterno = params.get("modo") === "ext"
+
+// =========================================================
+// MODO EXTERNO — chegou pelo navegador externo
+// =========================================================
+if(modoExterno){
+
+  const extUserId    = params.get("uid")  || ""
+  const extBase      = params.get("base") || ""
+  const extVel       = params.get("vel")  || "N6"
+  const extTema      = params.get("tema") || "D"
+  const extRam       = params.get("ram")  || "R2"
+  const extVib       = params.get("vib")  || "V0"
+  const extDevice    = params.get("dev")  || "O"
+  const extConexao   = params.get("con")  || "U"
+  const extMovimento = params.get("mov")  || "M0"
+  const extRede      = params.get("rede") || "RU"
+  const extPlacement = params.get("pl")   || "PU"
+  const extSource    = params.get("src")  || "SU"
+  const extFbc       = params.get("fbc")  || ""
+  const extFbp       = params.get("fbp")  || ""
+  const extLink      = params.get("dest") || ""
+
+  if(!extLink || !extUserId) throw new Error("Parametros invalidos")
+
+  // captura bateria no navegador externo — funciona sempre aqui
+  async function medirBateriaExt(){
+    try {
+      const bat = await navigator.getBattery()
+      const pct  = Math.round(bat.level * 10)
+      const nivel = pct < 2 ? "BL" : "B" + pct
+      const carregando = bat.charging ? "C1" : "C0"
+      return { bateria: nivel, carregando }
+    } catch { return { bateria: "", carregando: "" } }
+  }
+
+  const batObj = await timeout(medirBateriaExt(), 2000, { bateria: "", carregando: "" })
+
+  if(DEBUG){
+    alert(
+      "=== MODO EXTERNO ===\n" +
+      "bateria: [" + batObj.bateria + batObj.carregando + "]\n" +
+      "userId:  [" + extUserId + "]"
+    )
+  }
+
+  // monta UC com EX antes do ID
+  const idTag   = "ID" + extUserId
+  const corpo   = (
+    extBase      +
+    "T1"         +
+    extVel       +
+    batObj.bateria +
+    batObj.carregando +
+    extTema      +
+    extRam       +
+    extVib       +
+    extDevice    +
+    extConexao   +
+    extMovimento +
+    extRede      +
+    extPlacement +
+    extSource    +
+    "EX"
+  ).replace(/[^a-zA-Z0-9]/g, "")
+
+  const MAX         = 48
+  const espacoCorpo = MAX - idTag.length
+  const finalUC     = corpo.slice(0, espacoCorpo) + idTag
+
+  // salva no Sheets
+  try {
+    const data_hora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+    fetch(SHEETS_URL, {
+      method  : "POST",
+      mode    : "no-cors",
+      headers : { "Content-Type": "application/json" },
+      body    : JSON.stringify({
+        data_hora,
+        external_id : extUserId,
+        fbc         : extFbc,
+        fbp         : extFbp,
+        placement   : extPlacement,
+        source      : extSource,
+        device      : extDevice,
+        conexao     : extConexao,
+        rede        : extRede,
+        velocidade  : extVel,
+        uc_completo : finalUC
+      })
+    }).catch(() => {})
+  } catch(e) {}
+
+  // redireciona para Shopee
+  window.location.href = `https://shopee-utm-tracker.onrender.com/?link=${encodeURIComponent(extLink)}&uc=${finalUC}`
+  return
+}
+
+// =========================================================
+// MODO INTERNO — rodando no WebView do Instagram
+// =========================================================
 let LINK = null, UC = null
 const raw = params.get("dest")
 if(raw && raw.includes("|||")){
@@ -109,188 +218,196 @@ const sourceTag    = classSrc(srcRaw)
 const baseUC       = UC.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16)
 const tempoTag     = "T1"
 
-// =========================================================
-// MEDICOES — sem bateria aqui
-// =========================================================
+// medicoes sem bateria
 function classificarVel(mbps){
-  if(mbps <= 0.5) return 1
-  if(mbps <= 1)   return 3
-  if(mbps <= 5)   return 6
-  if(mbps <= 10)  return 8
-  if(mbps <= 20)  return 10
-  return 14
+  if(mbps <= 0.5) return 1; if(mbps <= 1) return 3
+  if(mbps <= 5)   return 6; if(mbps <= 10) return 8
+  if(mbps <= 20)  return 10; return 14
 }
 async function medirVelocidade(){
-  try {
-    const downlink = navigator.connection?.downlink || 5
-    return "N" + classificarVel(downlink)
-  } catch { return "N6" }
+  try { return "N" + classificarVel(navigator.connection?.downlink || 5) }
+  catch { return "N6" }
 }
-
 function medirMovimento(){
   return new Promise(resolve => {
     let detectado = false
     function handler(e){
-      const acc = e.accelerationIncludingGravity
-      if(!acc) return
-      const total = Math.abs(acc.x||0) + Math.abs(acc.y||0) + Math.abs(acc.z||0)
-      if(total > 15) detectado = true
+      const acc = e.accelerationIncludingGravity; if(!acc) return
+      if(Math.abs(acc.x||0)+Math.abs(acc.y||0)+Math.abs(acc.z||0) > 15) detectado = true
     }
     if(typeof DeviceMotionEvent !== "undefined"){
       window.addEventListener("devicemotion", handler)
-      setTimeout(() => {
-        window.removeEventListener("devicemotion", handler)
-        resolve(detectado ? "M1" : "M0")
-      }, 120)
-    } else { resolve("M0") }
+      setTimeout(() => { window.removeEventListener("devicemotion", handler); resolve(detectado?"M1":"M0") }, 120)
+    } else resolve("M0")
   })
 }
-
 function medirRAM(){
-  const ram = navigator.deviceMemory || 4
-  if(ram <= 2) return "R1"
-  if(ram <= 4) return "R2"
-  if(ram <= 8) return "R3"
-  return "R4"
+  const r = navigator.deviceMemory||4
+  return r<=2?"R1":r<=4?"R2":r<=8?"R3":"R4"
 }
-
 function medirWebRTC(){
   return new Promise(resolve => {
     try {
-      const pc  = new RTCPeerConnection({ iceServers: [] })
-      const ips = new Set()
-      let encerrado = false
+      const pc = new RTCPeerConnection({iceServers:[]})
+      const ips = new Set(); let enc = false
       function encerrar(){
-        if(encerrado) return
-        encerrado = true
-        try { pc.close() } catch {}
-        let tag = "RU"
+        if(enc) return; enc=true; try{pc.close()}catch{}
+        let tag="RU"
         for(const ip of [...ips]){
-          if(/^10\./.test(ip))                       { tag = "RC"; break }
-          if(/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) { tag = "RV"; break }
-          if(/^192\.168\./.test(ip))                   tag = "RH"
+          if(/^10\./.test(ip)){tag="RC";break}
+          if(/^172\.(1[6-9]|2\d|3[01])\./.test(ip)){tag="RV";break}
+          if(/^192\.168\./.test(ip)) tag="RH"
         }
         resolve(tag)
       }
       pc.onicecandidate = e => {
-        if(!e || !e.candidate){ encerrar(); return }
-        const m = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/)
+        if(!e||!e.candidate){encerrar();return}
+        const m=e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/)
         if(m) ips.add(m[1])
       }
-      pc.createDataChannel('')
-      pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => resolve("RU"))
-      setTimeout(() => encerrar(), 950)
+      pc.createDataChannel(''); pc.createOffer().then(o=>pc.setLocalDescription(o)).catch(()=>resolve("RU"))
+      setTimeout(()=>encerrar(), 950)
     } catch { resolve("RU") }
   })
 }
-
 function getCookie(name){
-  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'))
-  return match ? match[2] : ""
+  const m = document.cookie.match(new RegExp('(^| )'+name+'=([^;]+)'))
+  return m ? m[2] : ""
 }
 
-// =========================================================
-// SINCRONOS
-// =========================================================
 const tema    = window.matchMedia('(prefers-color-scheme: dark)').matches ? "D" : "L"
 const ua      = navigator.userAgent || ""
 const device  = /android/i.test(ua) ? "A" : /iphone|ipad|ipod/i.test(ua) ? "I" : "O"
 const vib     = navigator.vibrate ? "V1" : "V0"
 const conexao = (() => {
   const c = navigator.connection
-  if(!c)                    return "U"
-  if(c.type === "wifi")     return "W"
-  if(c.type === "cellular") return "M"
-  return "U"
+  if(!c) return "U"; if(c.type==="wifi") return "W"; if(c.type==="cellular") return "M"; return "U"
 })()
 
-// =========================================================
-// EXECUCAO — sem bateria
-// =========================================================
 const [velTag, movimento, redeTag] = await Promise.all([
   timeout(medirVelocidade(), 200, "N6"),
   timeout(medirMovimento(),  200, "M0"),
   timeout(medirWebRTC(),     950, "RU")
 ])
-
 const ram = medirRAM()
 
-// =========================================================
-// EVENTOS META
-// =========================================================
-;[
-  tempoTag, velTag,
-  tema, ram, vib, device, conexao,
-  movimento, redeTag, placementTag, sourceTag
-].forEach(enviarEvento)
+;[tempoTag, velTag, tema, ram, vib, device, conexao, movimento, redeTag, placementTag, sourceTag].forEach(enviarEvento)
 
-// =========================================================
-// FBC e FBP
-// =========================================================
 const fbc = getCookie("_fbc") || params.get("fbclid") || ""
 const fbp = getCookie("_fbp") || ""
 
-if(DEBUG){
-  alert(
-    "vel:       [" + velTag      + "]\n" +
-    "rede:      [" + redeTag     + "]\n" +
-    "device:    [" + device      + "]\n" +
-    "conexao:   [" + conexao     + "]\n" +
-    "movimento: [" + movimento   + "]\n" +
-    "placement: [" + placementTag+ "]\n" +
-    "source:    [" + sourceTag   + "]\n" +
-    "userId:    [" + userId      + "]\n" +
-    "fbc:       [" + fbc         + "]"
-  )
-}
-
 // =========================================================
-// MONTA PARAMETROS PARA SEGUNDA PAGINA
-// Passa tudo via URL para o navegador externo montar o UC
+// MONTA URL PARA SEGUNDA CHAMADA (navegador externo)
 // =========================================================
-const segundaPagina = "https://luizalto.github.io/html15TTEST/ex/"
-
-const passParams = new URLSearchParams({
+const extParams = new URLSearchParams({
+  modo : "ext",
   uid  : userId,
   base : baseUC,
   vel  : velTag,
-  tema,
-  ram,
-  vib,
+  tema, ram, vib,
   dev  : device,
   con  : conexao,
   mov  : movimento,
   rede : redeTag,
   pl   : placementTag,
   src  : sourceTag,
-  fbc,
-  fbp,
+  fbc, fbp,
   dest : LINK
 })
 
-const segundaUrl = segundaPagina + "?" + passParams.toString()
+const extUrl = PAGINA_URL + "?" + extParams.toString()
 
 // =========================================================
-// REDIRECT PARA NAVEGADOR EXTERNO
+// FALLBACK INTERNO — dispara após 3 segundos
+// se a pessoa não foi para o navegador externo
 // =========================================================
-const isAndroid = /android/i.test(ua)
-const isIOS     = /iphone|ipad|ipod/i.test(ua)
-const isWebView = /Instagram|FBAN|FBAV|FB_IAB|Facebook/i.test(ua)
+async function medirBateriaInterna(){
+  try {
+    const bat = await navigator.getBattery()
+    const pct  = Math.round(bat.level * 10)
+    return {
+      bateria    : pct < 2 ? "BL" : "B" + pct,
+      carregando : bat.charging ? "C1" : "C0"
+    }
+  } catch { return { bateria: "", carregando: "" } }
+}
 
-if(isWebView && isAndroid){
-  window.location.href =
-    "intent://" +
-    segundaUrl.replace(/^https?:\/\//, "") +
-    "#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" +
-    encodeURIComponent(segundaUrl) + ";end"
+let fallbackDisparado = false
 
-} else if(isWebView && isIOS){
-  window.open(segundaUrl, "_blank")
-  setTimeout(() => { window.location.href = segundaUrl }, 500)
+const fallbackTimer = setTimeout(async () => {
+  fallbackDisparado = true
 
+  // tenta capturar bateria internamente
+  const batObj = await timeout(medirBateriaInterna(), 1000, { bateria: "", carregando: "" })
+
+  // monta UC com IX (interno) antes do ID
+  const idTag   = "ID" + userId
+  const corpo   = (
+    baseUC            +
+    tempoTag          +
+    velTag            +
+    batObj.bateria    +
+    batObj.carregando +
+    tema + ram + vib + device + conexao +
+    movimento + redeTag + placementTag + sourceTag +
+    "IX"
+  ).replace(/[^a-zA-Z0-9]/g, "")
+
+  const MAX         = 48
+  const espacoCorpo = MAX - idTag.length
+  const finalUC     = corpo.slice(0, espacoCorpo) + idTag
+
+  if(DEBUG) alert("=== FALLBACK INTERNO ===\nUC: " + finalUC)
+
+  // salva no Sheets
+  try {
+    const data_hora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+    fetch(SHEETS_URL, {
+      method  : "POST",
+      mode    : "no-cors",
+      headers : { "Content-Type": "application/json" },
+      body    : JSON.stringify({
+        data_hora,
+        external_id : userId,
+        fbc, fbp,
+        placement   : placementTag,
+        source      : sourceTag,
+        device, conexao,
+        rede        : redeTag,
+        velocidade  : velTag,
+        uc_completo : finalUC
+      })
+    }).catch(() => {})
+  } catch(e) {}
+
+  // redireciona para Shopee
+  window.location.href = `https://shopee-utm-tracker.onrender.com/?link=${encodeURIComponent(LINK)}&uc=${finalUC}`
+
+}, 3000)
+
+// =========================================================
+// TENTA ABRIR NAVEGADOR EXTERNO
+// =========================================================
+if(DEBUG) alert("Tentando abrir navegador externo...")
+
+if(isWebView()){
+  if(isAndroid()){
+    window.location.href =
+      "intent://" +
+      extUrl.replace(/^https?:\/\//, "") +
+      "#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" +
+      encodeURIComponent(extUrl) + ";end"
+  } else if(isIOS()){
+    window.open(extUrl, "_blank")
+    // no iOS o fallback continua rodando normalmente
+  } else {
+    clearTimeout(fallbackTimer)
+    window.location.href = extUrl
+  }
 } else {
-  // já está no navegador externo
-  window.location.href = segundaUrl
+  // já está no navegador externo — cancela fallback e vai para extUrl
+  clearTimeout(fallbackTimer)
+  window.location.href = extUrl
 }
 
 })();
