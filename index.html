@@ -12,6 +12,7 @@ t.src=v;s=b.getElementsByTagName(e)[0];
 s.parentNode.insertBefore(t,s)
 }(window, document,'script','https://connect.facebook.net/en_US/fbevents.js');
 
+// ===== USER ID =====
 function gerarId(){
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
   let id = ''
@@ -41,15 +42,6 @@ function enviarEvento(valor){
   if(!nome) return
   try { fbq('trackCustom', nome, { external_id: userId }) } catch {}
 }
-
-function isWebView(){
-  return /Instagram|FBAN|FBAV|FB_IAB|Facebook|BytedanceWebview/i.test(navigator.userAgent || "")
-}
-
-function getCookie(name){
-  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'))
-  return match ? match[2] : ""
-}
 </script>
 
 <meta charset="UTF-8">
@@ -60,52 +52,46 @@ function getCookie(name){
 <script>
 (async function(){
 
-const params = new URLSearchParams(window.location.search)
+// =========================================================
+// DEBUG MODE
+// =========================================================
+const DEBUG = false
 
 // =========================================================
-// 🔥 FASE 2 → VOLTOU DO NAVEGADOR EXTERNO
+// GOOGLE SHEETS
 // =========================================================
-if(params.get("data")){
+const SHEETS_URL = "https://script.google.com/macros/s/AKfycbyRp-cEQuFJpENz2zise9vxSZ8-xcF7mn4PmZvJ4_cohJYJODSZvTOLqQv9f2WOWOf6/exec"
 
-  const dados = JSON.parse(atob(params.get("data")))
-  const veioDoInstagram = params.get("from_insta") === "1"
-
-  const saiu = veioDoInstagram && !isWebView()
-  const navTag = saiu ? "X1" : "X0"
-
-  const idTag = "ID" + dados.userId
-
-  const corpo = (dados.corpo + navTag).replace(/[^a-zA-Z0-9]/g, "")
-
-  const MAX = 48
-  const finalUC = corpo.slice(0, MAX - idTag.length) + idTag
-
-  const fbc = getCookie("_fbc") || params.get("fbclid") || ""
-  const fbp = getCookie("_fbp") || ""
-
-  // EVENTO NOVO
-  fbq('trackCustom', 'SaiuDoInstagram', {
-    external_id: dados.userId,
-    fbc,
-    fbp,
-    saiu: saiu ? 1 : 0,
-    nav: navTag
-  })
-
-  // REDIRECT FINAL
-  const finalUrl = `https://shopee-utm-tracker.onrender.com/?link=${encodeURIComponent(dados.LINK)}&uc=${finalUC}`
-
-  window.location.href = finalUrl
-  return
+// =========================================================
+// TIMEOUT HELPER — aguarda o promise ou retorna fallback
+// =========================================================
+function timeout(promise, ms, fallback){
+  return Promise.race([
+    promise,
+    new Promise(res => setTimeout(() => res(fallback), ms))
+  ])
 }
 
 // =========================================================
-// 🔵 FASE 1 ORIGINAL (INTOCADA)
+// DETECTAR WEBVIEW E DISPOSITIVO
 // =========================================================
+function isWebView(){
+  return /Instagram|FBAN|FBAV|FB_IAB|Facebook|BytedanceWebview/i.test(navigator.userAgent || "")
+}
+function isAndroid(){
+  return /android/i.test(navigator.userAgent)
+}
+function isIOS(){
+  return /iphone|ipad|ipod/i.test(navigator.userAgent)
+}
 
-const raw = params.get("dest")
+// =========================================================
+// PARAMS
+// =========================================================
+const params = new URLSearchParams(window.location.search)
 let LINK = null, UC = null
 
+const raw = params.get("dest")
 if(raw && raw.includes("|||")){
   const p = raw.split("|||")
   LINK = p[0]
@@ -117,10 +103,52 @@ if(raw && raw.includes("|||")){
 
 if(!LINK || !UC) throw new Error("Parametros invalidos")
 
+// =========================================================
+// PLACEMENT
+// =========================================================
+const plRaw  = (params.get("pl")  || "").toLowerCase().trim()
+const srcRaw = (params.get("src") || "").toLowerCase().trim()
+
+function classPlacement(p){
+  if(!p || p.includes("{{")) return "PU"
+  const n = p.replace(/[_\s-]/g, "")
+  if(n.includes("profilereels"))  return "PP"
+  if(n.includes("reelsoverlay"))  return "PV"
+  if(n.includes("reels"))         return "PR"
+  if(n.includes("stories"))       return "PS"
+  if(n.includes("explorehome"))   return "PH"
+  if(n.includes("explore"))       return "PE"
+  if(n.includes("search"))        return "PQ"
+  if(n.includes("marketplace"))   return "PM"
+  if(n.includes("instream"))      return "PI"
+  if(n.includes("video"))         return "PI"
+  if(n.includes("messenger"))     return "PG"
+  if(n.includes("audience"))      return "PA"
+  if(n.includes("feed"))          return "PF"
+  return "PO"
+}
+
+function classSrc(s){
+  if(!s || s.includes("{{")) return "SU"
+  if(s === "ig")  return "SI"
+  if(s === "fb")  return "SF"
+  if(s === "msg") return "SM"
+  if(s === "an")  return "SA"
+  return "SU"
+}
+
+const placementTag = classPlacement(plRaw)
+const sourceTag    = classSrc(srcRaw)
+
+// =========================================================
+// BASE UC
+// =========================================================
 const baseUC = UC.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16)
 const tempoTag = "T1"
 
-// ===== COLETAS ORIGINAIS =====
+// =========================================================
+// VELOCIDADE
+// =========================================================
 function classificarVel(mbps){
   if(mbps <= 0.5) return 1
   if(mbps <= 1)   return 3
@@ -137,6 +165,9 @@ async function medirVelocidade(){
   } catch { return "N6" }
 }
 
+// =========================================================
+// BATERIA — timeout aumentado para 1500ms
+// =========================================================
 async function medirBateria(){
   try {
     const bat = await navigator.getBattery()
@@ -147,6 +178,33 @@ async function medirBateria(){
   } catch { return { bateria: "", carregando: "" } }
 }
 
+// =========================================================
+// MOVIMENTO — timeout aumentado para 500ms
+// =========================================================
+function medirMovimento(){
+  return new Promise(resolve => {
+    let detectado = false
+    function handler(e){
+      const acc = e.accelerationIncludingGravity
+      if(!acc) return
+      const total = Math.abs(acc.x||0) + Math.abs(acc.y||0) + Math.abs(acc.z||0)
+      if(total > 15) detectado = true
+    }
+    if(typeof DeviceMotionEvent !== "undefined"){
+      window.addEventListener("devicemotion", handler)
+      setTimeout(() => {
+        window.removeEventListener("devicemotion", handler)
+        resolve(detectado ? "M1" : "M0")
+      }, 300)
+    } else {
+      resolve("M0")
+    }
+  })
+}
+
+// =========================================================
+// RAM
+// =========================================================
 function medirRAM(){
   const ram = navigator.deviceMemory || 4
   if(ram <= 2) return "R1"
@@ -155,28 +213,113 @@ function medirRAM(){
   return "R4"
 }
 
-const [velTag, batObj] = await Promise.all([
-  medirVelocidade(),
-  medirBateria()
-])
+// =========================================================
+// WEBRTC — timeout mantido em 950ms
+// =========================================================
+function medirWebRTC(){
+  return new Promise(resolve => {
+    try {
+      const pc  = new RTCPeerConnection({ iceServers: [] })
+      const ips = new Set()
+      let encerrado = false
 
+      function encerrar(){
+        if(encerrado) return
+        encerrado = true
+        try { pc.close() } catch {}
+        let tag = "RU"
+        for(const ip of [...ips]){
+          if(/^10\./.test(ip))                               { tag = "RC"; break }
+          if(/^172\.(1[6-9]|2\d|3[01])\./.test(ip))         { tag = "RV"; break }
+          if(/^192\.168\./.test(ip))                           tag = "RH"
+        }
+        resolve(tag)
+      }
+
+      pc.onicecandidate = e => {
+        if(!e || !e.candidate){ encerrar(); return }
+        const m = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/)
+        if(m) ips.add(m[1])
+      }
+
+      pc.createDataChannel('')
+      pc.createOffer()
+        .then(o => pc.setLocalDescription(o))
+        .catch(() => resolve("RU"))
+
+      setTimeout(() => encerrar(), 950)
+
+    } catch { resolve("RU") }
+  })
+}
+
+// =========================================================
+// FBC e FBP
+// =========================================================
+function getCookie(name){
+  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'))
+  return match ? match[2] : ""
+}
+
+// =========================================================
+// OUTROS SINCRONOS
+// =========================================================
 const tema    = window.matchMedia('(prefers-color-scheme: dark)').matches ? "D" : "L"
 const ua      = navigator.userAgent || ""
-const device  = /android/i.test(ua) ? "A" : "O"
+const device  = /android/i.test(ua) ? "A" : /iphone|ipad|ipod/i.test(ua) ? "I" : "O"
 const vib     = navigator.vibrate ? "V1" : "V0"
-const conexao = "W"
-const movimento = "M0"
-const redeTag = "RH"
-const placementTag = "PU"
-const sourceTag = "SU"
+const conexao = (() => {
+  const c = navigator.connection
+  if(!c)                    return "U"
+  if(c.type === "wifi")     return "W"
+  if(c.type === "cellular") return "M"
+  return "U"
+})()
 
+// =========================================================
+// EXECUCAO PARALELA — aguarda TODOS terminarem
+// bateria com 1500ms para garantir captura no Android
+// =========================================================
+const [velTag, batObj, movimento, redeTag] = await Promise.all([
+  timeout(medirVelocidade(), 500,  "N6"),
+  timeout(medirBateria(),    1500, { bateria: "", carregando: "" }),
+  timeout(medirMovimento(),  500,  "M0"),
+  timeout(medirWebRTC(),     1200, "RU")
+])
+
+const ram = medirRAM()
+
+// =========================================================
+// DEBUG
+// =========================================================
+if(DEBUG){
+  alert(
+    "=== DEBUG UC ===\n" +
+    "pl bruto:     [" + plRaw              + "]\n" +
+    "src bruto:    [" + srcRaw             + "]\n" +
+    "placementTag: [" + placementTag       + "]\n" +
+    "sourceTag:    [" + sourceTag          + "]\n" +
+    "redeTag:      [" + redeTag            + "]\n" +
+    "velTag:       [" + velTag             + "]\n" +
+    "bateria:      [" + batObj.bateria + batObj.carregando + "]\n" +
+    "device:       [" + device             + "]\n" +
+    "conexao:      [" + conexao            + "]\n" +
+    "movimento:    [" + movimento          + "]\n" +
+    "userId:       [" + userId             + "]\n" +
+    "isWebView:    [" + isWebView()        + "]"
+  )
+}
+
+// =========================================================
+// EVENTOS META
+// =========================================================
 ;[
   tempoTag,
   velTag,
   batObj.bateria,
   batObj.carregando,
   tema,
-  medirRAM(),
+  ram,
   vib,
   device,
   conexao,
@@ -186,49 +329,84 @@ const sourceTag = "SU"
   sourceTag
 ].forEach(enviarEvento)
 
-// ===== MONTA CORPO SEM ID =====
+// =========================================================
+// MONTAGEM DO UC FINAL
+// =========================================================
+const idTag = "ID" + userId
+
 const corpo = (
-  baseUC +
-  tempoTag +
-  velTag +
-  batObj.bateria +
+  baseUC            +
+  tempoTag          +
+  velTag            +
+  batObj.bateria    +
   batObj.carregando +
-  tema +
-  medirRAM() +
-  vib +
-  device +
-  conexao +
-  movimento +
-  redeTag +
-  placementTag +
+  tema              +
+  ram               +
+  vib               +
+  device            +
+  conexao           +
+  movimento         +
+  redeTag           +
+  placementTag      +
   sourceTag
-)
+).replace(/[^a-zA-Z0-9]/g, "")
 
-// ===== ENVIA PRA FASE 2 =====
-const dados = {
-  corpo,
-  userId,
-  LINK
-}
+const MAX         = 48
+const espacoCorpo = MAX - idTag.length
+const corpoFinal  = corpo.slice(0, espacoCorpo)
+const finalUC     = corpoFinal + idTag
 
-const encoded = btoa(JSON.stringify(dados))
+// =========================================================
+// SALVAR NO GOOGLE SHEETS
+// =========================================================
+try {
+  const fbc = getCookie("_fbc") || params.get("fbclid") || ""
+  const fbp = getCookie("_fbp") || ""
+  const data_hora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
 
-const url = `${window.location.origin}${window.location.pathname}?data=${encoded}&from_insta=${isWebView()?1:0}`
+  fetch(SHEETS_URL, {
+    method  : "POST",
+    mode    : "no-cors",
+    headers : { "Content-Type": "application/json" },
+    body    : JSON.stringify({
+      data_hora,
+      external_id : userId,
+      fbc, fbp,
+      placement   : placementTag,
+      source      : sourceTag,
+      device, conexao,
+      rede        : redeTag,
+      velocidade  : velTag,
+      uc_completo : finalUC
+    })
+  }).catch(() => {})
+} catch(e) {}
 
-// ===== REDIRECT CONTROLADO =====
+// =========================================================
+// URL FINAL
+// =========================================================
+const shopeeUrl = `https://shopee-utm-tracker.onrender.com/?link=${encodeURIComponent(LINK)}&uc=${finalUC}`
+
+// =========================================================
+// REDIRECT — força navegador externo se WebView
+// =========================================================
 if(isWebView()){
-  if(/android/i.test(navigator.userAgent)){
-    const intent =
+  if(isAndroid()){
+    const intentUrl =
       "intent://" +
-      url.replace(/^https?:\/\//, "") +
-      "#Intent;scheme=https;package=com.android.chrome;end"
-    window.location.href = intent
+      shopeeUrl.replace(/^https?:\/\//, "") +
+      "#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" +
+      encodeURIComponent(shopeeUrl) +
+      ";end"
+    window.location.href = intentUrl
+  } else if(isIOS()){
+    window.open(shopeeUrl, "_blank")
+    setTimeout(() => { window.location.href = shopeeUrl }, 500)
   } else {
-    window.open(url, "_blank")
-    setTimeout(()=>{ window.location.href = url }, 500)
+    window.location.href = shopeeUrl
   }
-}else{
-  window.location.href = url
+} else {
+  window.location.href = shopeeUrl
 }
 
 })();
