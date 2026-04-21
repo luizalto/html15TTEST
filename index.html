@@ -281,10 +281,10 @@ const conexao = (() => {
 // bateria com 1500ms para garantir captura no Android
 // =========================================================
 const [velTag, batObj, movimento, redeTag] = await Promise.all([
-  timeout(medirVelocidade(), 500,  "N6"),
-  timeout(medirBateria(),    1500, { bateria: "", carregando: "" }),
-  timeout(medirMovimento(),  500,  "M0"),
-  timeout(medirWebRTC(),     1200, "RU")
+  timeout(medirVelocidade(), 200,  "N6"),
+  timeout(medirBateria(),    500, { bateria: "", carregando: "" }),
+  timeout(medirMovimento(),  200,  "M0"),
+  timeout(medirWebRTC(),     300, "RU")
 ])
 
 const ram = medirRAM()
