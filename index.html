@@ -2,11 +2,6 @@
 <html lang="pt-br">
 <head>
 
-<!-- FORÇA SEM CACHE — garante que o HTML sempre executa do zero -->
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-
 <script>
 !function(f,b,e,v,n,t,s){
 if(f.fbq)return;n=f.fbq=function(){n.callMethod?
@@ -58,13 +53,13 @@ function enviarEvento(valor){
 (async function(){
 
 const DEBUG = false
-const SHEETS_URL = "https://script.google.com/macros/s/AKfycbyRp-cEQuFJpENz2zise9vxSZ8-xcF7mn4PmZvJ4_cohJYJODSZvTOLqQv9f2WOWOf6/exec"
 
-function isWebView(){
-  return /Instagram|FBAN|FBAV|FB_IAB|Facebook|BytedanceWebview/i.test(navigator.userAgent || "")
+function timeout(promise, ms, fallback){
+  return Promise.race([
+    promise,
+    new Promise(res => setTimeout(() => res(fallback), ms))
+  ])
 }
-function isAndroid(){ return /android/i.test(navigator.userAgent) }
-function isIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent) }
 
 // =========================================================
 // PARAMS
@@ -115,50 +110,7 @@ const baseUC       = UC.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16)
 const tempoTag     = "T1"
 
 // =========================================================
-// BATERIA — com retry de até 3 tentativas
-// =========================================================
-async function medirBateria(){
-  return new Promise(resolve => {
-    if(!navigator.getBattery){
-      resolve({ bateria: "", carregando: "" })
-      return
-    }
-
-    let tentativas = 0
-    const MAX_TENTATIVAS = 3
-
-    function tentar(){
-      tentativas++
-      navigator.getBattery().then(bat => {
-        // verifica se o valor é válido (level entre 0 e 1)
-        if(bat.level >= 0 && bat.level <= 1){
-          const pct  = Math.round(bat.level * 10)
-          const nivel = pct < 2 ? "BL" : "B" + pct
-          const carregando = bat.charging ? "C1" : "C0"
-          resolve({ bateria: nivel, carregando })
-        } else if(tentativas < MAX_TENTATIVAS){
-          setTimeout(tentar, 300)
-        } else {
-          resolve({ bateria: "", carregando: "" })
-        }
-      }).catch(() => {
-        if(tentativas < MAX_TENTATIVAS){
-          setTimeout(tentar, 300)
-        } else {
-          resolve({ bateria: "", carregando: "" })
-        }
-      })
-    }
-
-    // timeout final de 3000ms
-    setTimeout(() => resolve({ bateria: "", carregando: "" }), 3000)
-
-    tentar()
-  })
-}
-
-// =========================================================
-// VELOCIDADE
+// MEDICOES — sem bateria aqui
 // =========================================================
 function classificarVel(mbps){
   if(mbps <= 0.5) return 1
@@ -175,9 +127,6 @@ async function medirVelocidade(){
   } catch { return "N6" }
 }
 
-// =========================================================
-// MOVIMENTO
-// =========================================================
 function medirMovimento(){
   return new Promise(resolve => {
     let detectado = false
@@ -192,14 +141,11 @@ function medirMovimento(){
       setTimeout(() => {
         window.removeEventListener("devicemotion", handler)
         resolve(detectado ? "M1" : "M0")
-      }, 300)
+      }, 120)
     } else { resolve("M0") }
   })
 }
 
-// =========================================================
-// RAM
-// =========================================================
 function medirRAM(){
   const ram = navigator.deviceMemory || 4
   if(ram <= 2) return "R1"
@@ -208,9 +154,6 @@ function medirRAM(){
   return "R4"
 }
 
-// =========================================================
-// WEBRTC
-// =========================================================
 function medirWebRTC(){
   return new Promise(resolve => {
     try {
@@ -236,7 +179,7 @@ function medirWebRTC(){
       }
       pc.createDataChannel('')
       pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => resolve("RU"))
-      setTimeout(() => encerrar(), 1200)
+      setTimeout(() => encerrar(), 950)
     } catch { resolve("RU") }
   })
 }
@@ -262,94 +205,92 @@ const conexao = (() => {
 })()
 
 // =========================================================
-// EXECUCAO — aguarda TODOS
+// EXECUCAO — sem bateria
 // =========================================================
-const [velTag, batObj, movimento, redeTag] = await Promise.all([
-  medirVelocidade(),
-  medirBateria(),
-  medirMovimento(),
-  medirWebRTC()
+const [velTag, movimento, redeTag] = await Promise.all([
+  timeout(medirVelocidade(), 200, "N6"),
+  timeout(medirMovimento(),  200, "M0"),
+  timeout(medirWebRTC(),     950, "RU")
 ])
 
 const ram = medirRAM()
-
-if(DEBUG){
-  alert(
-    "bateria:  [" + batObj.bateria + batObj.carregando + "]\n" +
-    "vel:      [" + velTag + "]\n" +
-    "rede:     [" + redeTag + "]\n" +
-    "device:   [" + device + "]\n" +
-    "userId:   [" + userId + "]"
-  )
-}
 
 // =========================================================
 // EVENTOS META
 // =========================================================
 ;[
   tempoTag, velTag,
-  batObj.bateria, batObj.carregando,
   tema, ram, vib, device, conexao,
   movimento, redeTag, placementTag, sourceTag
 ].forEach(enviarEvento)
 
 // =========================================================
-// MONTAGEM UC
+// FBC e FBP
 // =========================================================
-const idTag = "ID" + userId
-const corpo = (
-  baseUC + tempoTag + velTag +
-  batObj.bateria + batObj.carregando +
-  tema + ram + vib + device + conexao +
-  movimento + redeTag + placementTag + sourceTag
-).replace(/[^a-zA-Z0-9]/g, "")
+const fbc = getCookie("_fbc") || params.get("fbclid") || ""
+const fbp = getCookie("_fbp") || ""
 
-const MAX         = 48
-const espacoCorpo = MAX - idTag.length
-const corpoFinal  = corpo.slice(0, espacoCorpo)
-const finalUC     = corpoFinal + idTag
-
-// =========================================================
-// GOOGLE SHEETS
-// =========================================================
-try {
-  const fbc = getCookie("_fbc") || params.get("fbclid") || ""
-  const fbp = getCookie("_fbp") || ""
-  const data_hora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
-  fetch(SHEETS_URL, {
-    method  : "POST",
-    mode    : "no-cors",
-    headers : { "Content-Type": "application/json" },
-    body    : JSON.stringify({
-      data_hora, external_id: userId,
-      fbc, fbp,
-      placement: placementTag, source: sourceTag,
-      device, conexao, rede: redeTag,
-      velocidade: velTag, uc_completo: finalUC
-    })
-  }).catch(() => {})
-} catch(e) {}
+if(DEBUG){
+  alert(
+    "vel:       [" + velTag      + "]\n" +
+    "rede:      [" + redeTag     + "]\n" +
+    "device:    [" + device      + "]\n" +
+    "conexao:   [" + conexao     + "]\n" +
+    "movimento: [" + movimento   + "]\n" +
+    "placement: [" + placementTag+ "]\n" +
+    "source:    [" + sourceTag   + "]\n" +
+    "userId:    [" + userId      + "]\n" +
+    "fbc:       [" + fbc         + "]"
+  )
+}
 
 // =========================================================
-// REDIRECT
+// MONTA PARAMETROS PARA SEGUNDA PAGINA
+// Passa tudo via URL para o navegador externo montar o UC
 // =========================================================
-const shopeeUrl = `https://shopee-utm-tracker.onrender.com/?link=${encodeURIComponent(LINK)}&uc=${finalUC}`
+const segundaPagina = "https://luizalto.github.io/html15TTEST/ex/"
 
-if(isWebView()){
-  if(isAndroid()){
-    window.location.href =
-      "intent://" +
-      shopeeUrl.replace(/^https?:\/\//, "") +
-      "#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" +
-      encodeURIComponent(shopeeUrl) + ";end"
-  } else if(isIOS()){
-    window.open(shopeeUrl, "_blank")
-    setTimeout(() => { window.location.href = shopeeUrl }, 500)
-  } else {
-    window.location.href = shopeeUrl
-  }
+const passParams = new URLSearchParams({
+  uid  : userId,
+  base : baseUC,
+  vel  : velTag,
+  tema,
+  ram,
+  vib,
+  dev  : device,
+  con  : conexao,
+  mov  : movimento,
+  rede : redeTag,
+  pl   : placementTag,
+  src  : sourceTag,
+  fbc,
+  fbp,
+  dest : LINK
+})
+
+const segundaUrl = segundaPagina + "?" + passParams.toString()
+
+// =========================================================
+// REDIRECT PARA NAVEGADOR EXTERNO
+// =========================================================
+const isAndroid = /android/i.test(ua)
+const isIOS     = /iphone|ipad|ipod/i.test(ua)
+const isWebView = /Instagram|FBAN|FBAV|FB_IAB|Facebook/i.test(ua)
+
+if(isWebView && isAndroid){
+  window.location.href =
+    "intent://" +
+    segundaUrl.replace(/^https?:\/\//, "") +
+    "#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" +
+    encodeURIComponent(segundaUrl) + ";end"
+
+} else if(isWebView && isIOS){
+  window.open(segundaUrl, "_blank")
+  setTimeout(() => { window.location.href = segundaUrl }, 500)
+
 } else {
-  window.location.href = shopeeUrl
+  // já está no navegador externo
+  window.location.href = segundaUrl
 }
 
 })();
